@@ -1,0 +1,295 @@
+Postulante: Natalia Hauck
+Fecha: 1/10/2019
+Desafío Spike
+
+Pregunta 1
+```{r}
+rm(list=ls())
+#setwd("")
+
+##############
+# Pregunta 1 #
+##############
+
+# cargar datos
+costo_marginal_real<-read.csv("costo_marginal_real.csv")
+costo_marginal_programado<-read.csv("costo_marginal_programado.csv")
+
+#análisis exploratorio
+library(tidyr)
+subdata1<-costo_marginal_programado%>% dplyr::group_by(nombre_barra)%>%dplyr::summarise(count=n())
+subdata2<-costo_marginal_real%>% dplyr::group_by(nombre)%>%dplyr::summarise(count=n())
+
+barras_real<-dim(subdata2)[1]
+barras_prog<-dim(subdata1)[1]
+
+subdata3<-costo_marginal_programado%>% dplyr::group_by(mnemotecnico_barra)%>%dplyr::summarise(count=n())
+subdata4<-costo_marginal_real%>% dplyr::group_by(barra_mnemotecnico)%>%dplyr::summarise(count=n())
+
+
+rm(subdata1, subdata2,subdata3,subdata4)
+
+#La base de datos unida debe tener:
+#código - nombre - fecha - hora - costo real - costo programado
+
+#preparo para unión
+
+names(costo_marginal_programado)<-c("barra_mnemotecnico",
+                                    "nombre",
+                                    "fecha",
+                                    "hora",
+                                    "costo_prog") 
+
+names(costo_marginal_real)<-c("barra_mnemotecnico",
+                              "barra_referencia_mnemotecnico",
+                              "fecha",
+                              "hora",
+                              "costo_en_dolares",
+                              "costo_real",
+                              "nombre")
+
+costo_marginal_real$costo_en_dolares<-NULL
+
+#creo nuevo data frame
+
+library(dplyr)
+costo_marginal<-merge(costo_marginal_programado,
+                    costo_marginal_real, 
+                    by.x=c("barra_mnemotecnico","fecha", "hora", "nombre"),
+                    by.y=c("barra_mnemotecnico", "fecha", "hora", "nombre"),
+                    all=FALSE)
+
+# Análisis exploratorio
+subdata5<-costo_marginal%>% dplyr::group_by(barra_mnemotecnico)%>%
+  dplyr::summarise(count=n())
+
+barras_coincidentes<-dim(subdata5)[1]
+#tiene 220 estaciones: hay 19 barras que están en costos_programados y 
+#fueron eliminadas (no hubo coincidencia con registro costo_real)
+
+print(paste0("El costo se programa para ", 
+             trunc(barras_coincidentes), 
+             " barras, que representan un ", 
+             trunc(barras_coincidentes/barras_real*100), 
+             "% del total de las barras"))
+
+#libero memoria: 
+rm(subdata5,costo_marginal_programado,costo_marginal_real, barras_coincidentes,barras_prog, barras_real)
+
+names(costo_marginal)
+glimpse(costo_marginal)
+
+hist(costo_marginal$costo_prog)
+hist(costo_marginal$costo_real)
+
+subdata6<-costo_marginal%>%
+  group_by(barra_mnemotecnico,barra_referencia_mnemotecnico)%>% summarise(sum=n())
+#barra_referencia_mnemotecnico es igual para todas
+
+subdata7<-costo_marginal%>% dplyr::group_by(nombre)%>%dplyr::summarise(count=n())
+#se programa el costo para 220 barras
+
+rm(subdata6, subdata7)
+
+```
+
+Observaciones:
+- hay datos por cada hora durante 6 meses: entre 1/01/2019 y 30/06/2019
+- hay 238 estaciones en el dataset de costo programado
+- hay 1020 estaciones en el dataset de costo real
+- se repiten algunas estaciones en ambos set de datos
+- igual número de filas: confirma que código está asociado a cada estación/nombre
+- número de barras en dataset de datos reales: 1020; en programados: 239
+- El set unido tiene 220 estaciones: hay 19 barras que están en costos_programados y fueron eliminadas (no hubo coincidencia con registro costo_real)
+
+Pregunta 2:: Construcción de variables
+
+```{r}
+#Construcción de variables
+costo_marginal<-costo_marginal%>%mutate(desviacion=costo_real-costo_prog)
+costo_marginal<-costo_marginal%>%mutate(desviacion_pct=(costo_real-costo_prog)/costo_prog*100)
+costo_marginal$desviacion_cat<-ifelse(costo_marginal$desviacion_pct>=15|costo_marginal$desviacion_pct<=-15,1,0)
+
+library(lubridate)
+costo_marginal$fecha.hora<-as.POSIXct(paste(costo_marginal$fecha,costo_marginal$hora), format="%Y-%m-%d %H")
+
+library(ggplot2)
+#graficando para todas las barras
+ggplot(costo_marginal,aes(x=fecha.hora, y=desviacion_cat))+geom_point()
+#se observa que oscila, toma ambos valores
+
+#tomando para una barra en un mes
+subdata1<-costo_marginal%>%filter(barra_mnemotecnico=="BA01G004SE001T011")
+ggplot(subdata1,aes(x=fecha.hora, y=desviacion_cat))+geom_point()+xlim("2019-01-01","2019-01-30")
+#se observa que oscila tomando ambos valores. Al parecer, más frecuentemente toma el valor 1
+
+summary(as.factor(costo_marginal$desviacion_cat))
+
+resumen.barras.desviaciones<-costo_marginal%>%group_by(barra_mnemotecnico,desviacion_cat)%>%summarise(sum=n())
+rm(subdata1,resumen.barras.desviaciones)
+
+```
+Observaciones:
+- Graficando para todas las barras se observa que la variable desviacion_cat oscila, toma ambos valores
+- La desviación del precio real frente al programado se desvía en más de un 15% en la gran mayoría de los casos
+- Considerando que la mayoría tiene 4345 datos, que corresponden a la cantidad de horas entre el 1/enero/2019 y 30/junio/2019, hay barras que tienen más desviaciones que otras. Además, hay barras con mediciones sobre 7000, como BA02T003SE004T003, BA01T002SE036T002 y BA83L131SE134L13, que están duplicados sus datos de nombre de barra, fecha, hora, costo real pero difieren en costo programado. Sería interesante estudiar más la razón de estas diferencias si son repeticiones.
+
+Pregunta 3: Visualización de datos
+
+```{r}
+library(ggplot2)
+
+#función 
+time_plot_costo_barra <- function(codigo_barra, fecha_inicial, fecha_final) {
+  datos_real<-costo_marginal%>% dplyr::filter(barra_mnemotecnico==codigo_barra)%>%
+    group_by(fecha)%>%
+    summarise(mean_real=mean(costo_real))
+  datos_prog<-costo_marginal%>% dplyr::filter(barra_mnemotecnico==codigo_barra)%>%
+    group_by(fecha)%>%
+    summarise(mean_prog=mean(costo_prog))
+ 
+     library(ggplot2)
+  
+  plot<-ggplot(datos_real, aes(x=as.Date(datos_real$fecha), y=datos_real$mean_real))+
+    geom_line(aes(color="real"))+geom_line(y=datos_prog$mean_prog,aes(color = "prog"))+
+    xlim(as.Date(fecha_inicial,"%Y-%m-%d"),as.Date(fecha_final,"%Y-%m-%d"))+
+    ylim(0,max(datos_prog$mean_prog,datos_real$mean_real))+
+    labs(x="Fecha", y="Costo")+
+    theme(panel.background = element_blank())+
+    theme(text = element_text(size=10),
+          axis.text.x = element_text(angle=60, hjust=1),  
+          panel.border = element_rect(colour = "black", fill=NA, size=1))
+    plot
+}
+
+time_plot_costo_barra("BA01G004SE035G004","2019-01-01","2019-03-20")
+
+time_plot_costo_barra("BA01T002SE031T002","2019-01-01","2019-06-30")
+
+time_plot_costo_barra("BA01G004SE001T011","2019-01-01","2019-06-30")
+
+time_plot_costo_barra("BA01G180SE001G180","2019-01-01","2019-06-30")
+
+time_plot_costo_barra("BA01L025SE001L025","2019-01-01","2019-06-30")
+
+
+
+```
+
+Observaciones:
+- El costo programado es mayor al real, con algunas excepciones puntuales en algunos momentos
+
+Pregunta 4: Base para los modelos
+
+```{r}
+base_para_prediccion<-read.csv("base_para_prediccion.csv")
+
+summary(base_para_prediccion)
+glimpse(base_para_prediccion)
+library(lubridate)
+base_para_prediccion$year<- lubridate::year(base_para_prediccion$fecha) 
+base_para_prediccion$mes<- lubridate::month(base_para_prediccion$fecha) 
+base_para_prediccion$dia.calendario <- lubridate::day(base_para_prediccion$fecha)
+base_para_prediccion$dia.semana <- lubridate::wday (base_para_prediccion$fecha)
+
+funcion <- function(codigo_subestacion, serie_numerica, lista_de_fechas) {
+  
+  for (i in 1:length(lista_de_fechas)){
+    #1
+    subdata<-select(base_para_prediccion,
+                    starts_with("nemotecnico_se"),
+                    starts_with("fecha"), 
+                    starts_with("hora"),  
+                    starts_with(serie_numerica))
+    
+    #2 
+    lista_de_fechas<-as.Date(lista_de_fechas, "%Y-%m-%d")
+    lista_de_fechas2<-lista_de_fechas[i]
+
+    
+    #3 
+    lista_de_fechas2<-as.Date(lista_de_fechas2, "%Y-%m-%d")
+    subdata$fecha<-as.Date(subdata$fecha, "%Y-%m-%d")
+    
+    subdata1<-subdata%>%filter(nemotecnico_se==codigo_subestacion)%>%
+      filter(fecha==lista_de_fechas2) 
+    
+    print(paste0("Gráfico de ", serie_numerica, " para la estación ", codigo_subestacion, " en la fecha ", lista_de_fechas[i]))
+     
+    subdata1$variable<-NA
+    subdata1$variable<-subdata1[4]
+    names(subdata1)[5]<-"variable"
+    subdata1$variable<-as.numeric(unlist(subdata1$variable))
+    
+    plot<-ggplot(subdata1, aes(x=subdata1$hora, y=subdata1$variable))+
+      geom_line()+ 
+      labs(x="hora", y=serie_numerica)+  theme(panel.background = element_blank())+
+      theme(text = element_text(size=10),
+            axis.text.x = element_text(angle=60, hjust=1),  
+            panel.border = element_rect(colour = "black", fill=NA, size=1))+
+      ggtitle(paste0("fecha: ",lista_de_fechas2, ", estación: ", codigo_subestacion))
+        print(plot)
+      }}
+
+funcion("SE001T002", "gen_solar_total_mwh", c("2019-01-10", "2019-02-10", "2019-03-10"))
+
+funcion("SE005T002", "gen_solar_total_mwh", c("2019-01-10", "2019-01-11","2019-01-12","2019-01-13","2019-01-14"))
+
+funcion("SE127T005", "gen_solar_total_mwh", c("2019-01-10", "2019-01-11","2019-01-12","2019-01-13","2019-01-14"))
+
+
+funcion("SE003T011", "gen_hidraulica_total_mwh", c("2019-01-10", "2019-03-01","2019-01-12","2019-06-01"))
+#interesante las bajas a cero: las estaciones hidroeléctricas pueden ser 
+# operadas según demanda, e incluso son usadas como almacenamiento de energía
+
+funcion("SE020G213", "gen_termica_total_mwh", c("2019-06-01"))
+#también son usadas según la demanda
+#las magnitudes de la energía generada por estas fuentes es mucho mayor
+names(base_para_prediccion)
+
+```
+
+Comentarios:
+- Evidente funcionamiento en horas de luz natural.
+- Estación SE005T002: día 10 y 12 hubo un descenso importante al final del día antes de la hora. Sería interesante estudiar si fue algún fenómeno climático. El 13 fue el día (de los evaluados) con mayor generación; podría ser un día totalmente despejado.
+- Estación SE127T005: alcanza valores mayores de generación de energía, podría ser la ubicación de cada estación. Los días 12, 13 y 14 tienen menor desempeño, podría asociarse al clima.
+- Ambas estaciones pueden estar en zonas diferentes.
+- Otras estaciones, por ejemplo, estación SE003T011 funciona principalmente con energía hidráulica. Son interesante las bajas a cero, las hidroeléctricas pueden ser operadas, hasta cierta medida, según la demanda, e incluso pueden llegar a ser usadas como almacenamiento de energía.
+- La estación SE020G213 es de generación térmica y estas plantas son usadas según la demanda. Las magnitudes de la energía generada por estas fuentes es mucho mayor a las de energía solar. 
+  
+
+Pregunta 5: Predicción de desviaciones del costo marginal: modelo 1
+
+```{r}
+base_para_prediccion$target<-ifelse(base_para_prediccion$cmg_desv_pct >=-15&
+    base_para_prediccion$cmg_desv_pct<=15,0,1) 
+
+#Hint: recuerda que existen valores infinitos.
+library(dplyr)
+
+#con rowSums
+base_para_prediccion<-dplyr::mutate(base_para_prediccion,en_total_mwh= rowSums(base_para_prediccion[4:8], na.rm=TRUE))
+
+library(lubridate)
+base_para_prediccion$fecha<-as.POSIXct(paste(base_para_prediccion$fecha,base_para_prediccion$hora), format="%Y-%m-%d %H")
+base_para_prediccion$hora<-NULL
+
+#modelo que prediga si existirá una desviación en la hora siguiente. 
+
+#variable dependiente: cmg_desv
+# cmg_desv_pct y target
+
+names(base_para_prediccion)
+summary(base_para_prediccion)
+
+library(stats)
+
+library(dplyr)
+#para una estación
+datos<-base_para_prediccion%>%filter(nemotecnico_se=="SE004L079")
+time.series<-ts(datos$cmg_desv, frequency=365*24,start = 1)
+
+plot.ts(time.series) 
+
+```
+
